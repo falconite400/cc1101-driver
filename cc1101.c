@@ -120,6 +120,9 @@ void read_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **output, bool burst) {
     }
 }
 
+void transmit(CC1101 *cc1101, int frequency, uint8_t data) {
+}
+
 void get_part_num(CC1101 *cc1101, uint8_t **output) {
     const uint8_t addr = 0x30;
     read_reg(cc1101, addr, output, 0);

@@ -34,11 +34,6 @@ typedef struct {
 CC1101 *cc1101_init(char sck, char tx, char rx, char cs, int num);
 
 
-void write_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **data, bool burst);
-void read_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **output, bool burst);
-
-
-
 /* Get the part number for the CC1101. Address 0x30
     spi_inst_t *spi: the spi identifer for a spi bus
     uint8_t data: the buffer the read data will be stored
