@@ -1,17 +1,19 @@
 /*
+    Copyright @falconite400
     CC1101 driver for the Raspberry Pi Pico using the C SDK
 
 */
 
 #ifndef _CC1101_H_
 #define _CC1101_H_
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <inttypes.h>
+
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
-
-#define SINGLE_BYTE_TX_FIFO 0x3f // register address for single byte tx fifo
-#define BURST_ACCESS_TX_FIFO 0x7f // address for burst access tx fifo
-#define SINGLE_BYTE_RX_FIFO 0xbf // address for single byte rx fifo
-#define BUSRT_ACCESS_RX_FIFO 0xff // address for burst access rx fifo
+#include "pico/cyw43_arch.h"
 
 
 typedef struct {
@@ -39,6 +41,5 @@ CC1101 *cc1101_init(char sck, char tx, char rx, char cs, int num);
     uint8_t data: the buffer the read data will be stored
 */
 void get_part_num(CC1101 *cc1101, uint8_t **output);
-
 
 #endif

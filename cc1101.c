@@ -1,17 +1,26 @@
 /*
+    Copyright @falconite400
     CC1101 driver for the Raspberry Pi Pico using the C SDK
 
 */
-/*
-All transactions on the SPI interface start with
-a header byte containing a R/W bit, a burst
-access bit (B), and a 6-bit address (A5 – A0).
-*/
+
 #include "cc1101.h"
-#include "hardware/spi.h"
-#include "pico/stdlib.h"
-#include <stdio.h>
-#include <stdlib.h>
+
+
+// FIFO addresses
+#define SINGLE_BYTE_TX_FIFO 0x3f
+#define BURST_ACCESS_TX_FIFO 0x7f
+#define SINGLE_BYTE_RX_FIFO 0xbf
+#define BUSRT_ACCESS_RX_FIFO 0xff
+
+// command strobe addresses
+#define RESET_CHIP 0x30
+#define ENABLE_RX 0x34
+#define ENABLE_TX 0x35
+
+// status register addresses
+#define PARTNUM_ADDR 0x30
+#define VERSION_ADDR 0x31
 
 
 CC1101 *cc1101_init(char sck, char tx, char rx, char cs, int num) {
@@ -25,7 +34,7 @@ CC1101 *cc1101_init(char sck, char tx, char rx, char cs, int num) {
         return NULL;
     }
 
-    spi_init(cc1101->spi_bus, 500000);
+    spi_init(cc1101->spi_bus, 115200);
     
     // spi interface, 8 data bits per transfer, CPOL
     // polarity and CPHA phase both 0, must be SPI_MSB_FIRST
@@ -46,84 +55,81 @@ CC1101 *cc1101_init(char sck, char tx, char rx, char cs, int num) {
 }
 
 
-void write_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **data, bool burst) {
+void write_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **data, size_t data_size, bool burst) {
 
-    // header byte to send to the cc1101. the first bit is read/write (1/0),
-    // the second bit is burst access (used to access consecutive registers
-    // more efficiently, and the last 6 are address bits. burst access is
-    // activated with a 1 bit. if the burst access bit is 0, the cc1101 expects
-    // one data byte afterward
+    // header byte consists of R/W bit, burst access bit, and 6-bit address
     uint8_t header_byte;
 
-    // write CS low
-    gpio_put(cc1101->cs_pin, 0);
 
-    // Set the header byte. First bit is R/W (1/0), second is burst access
-    // (used to access consecutive registers more efficiently), next six are
-    // address bits
     
-    //test
-    // ensure that the first two bits of reg_addr are 0, while doing nothing
-    // to the six address bits
+    // ensure that the first two bits of reg_addr are 0 but leave other bits alone
     reg_addr &= 0b00111111;
 
+    // pull CS low
+    gpio_put(cc1101->cs_pin, 0);
+
     if (burst) {
-        // burst address bit (second bit) needs to be set to 1.
-        // combine register address with first two bits of header byte
-        // (which are read (0) and burst (1)
+        // set burst address bit to 1 and combine with register address byte
         header_byte = 0b01000000 | reg_addr;
 
         // write header byte
         spi_write_blocking(cc1101->spi_bus, &header_byte, 1);
-        // write each byte of data to consecutive addresses in tx fifo after reg_addr
-        // (the currently written to address is automatically increased by the chip
-        // on the module)
-        for (int i = 0; i < (sizeof(data) / sizeof(*data[0])); i++) {
+        // write data in burst mode (register address automatically advances)
+        for (int i = 0; i < data_size; i++) {
             printf("%d %c\n", i, *data[0]);
             spi_write_blocking(cc1101->spi_bus, data[i], 1);
         }
-
     } else {
-        // single byte access.
-        // same procedure for the header byte, except the second bit is zero to
-        // indicate single byte access instead of burst access
+        //second bit is zero to indicate single byte access instead of burst access
         header_byte = 0b00000000 | reg_addr;
-        // write the header byte to the cc1101
+        // write the header byte and singular data byte
         spi_write_blocking(cc1101->spi_bus, &header_byte, 1);
         spi_write_blocking(cc1101->spi_bus, data[0], 1);
     }
 
-    // pull chip select high, which will terminate burst access writing if it was
-    // active.
+    // pull chip select high
     gpio_put(cc1101->cs_pin, 1);
-
 }
 
-void read_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **output, bool burst) {
+void read_reg(CC1101 *cc1101, uint8_t reg_addr, uint8_t **read_data, size_t read_size, bool burst) {
 
     uint8_t header_byte;
-    uint8_t data;
 
-    // ensure that the first two bits of reg_addr are 0, while doing nothing
-    // to the six address bits
+    // ensure that the first two bits of reg_addr are 0 but leave other bits alone
     reg_addr &= 0b00111111;
 
+    // pull CS low
+    gpio_put(cc1101->cs_pin, 0);
+
     if (burst) {
-        // set header byte. first bit is read (1), second bit is burst access (1)
+        // set read bit (1) and burst access bit (1), then combine with reg_addr
         header_byte = 0b11000000 | reg_addr;
-        // write the header byte to the cc1101
+        // write the header byte
         spi_write_blocking(cc1101->spi_bus, &header_byte, 1);
-        // read from each of the 64 bytes in the rx fifo if the data is not empty
-        for (int i = 0; i < 64; i++) {
-            spi_read_blocking(cc1101->spi_bus, 0, output[i], 1);
+        // read bytes and store them into the output array
+        for (int i = 0; i < read_size; i++) {
+            spi_read_blocking(cc1101->spi_bus, 0, *read_data, 1);
+            read_data++;
         }
+
+    } else {
+        // set R/W to 1 (read) and burst access to 0, combine with reg_addr
+        header_byte = 0b10000000 | reg_addr;
+        // write the header byte
+        spi_write_blocking(cc1101->spi_bus, &header_byte, 1);
+        // read a single byte to the output buffer
+        spi_read_blocking(cc1101->spi_bus, 0, *read_data, 1);
     }
+
+    // pull chip select high
+    gpio_put(cc1101->cs_pin, 1);
 }
 
 void transmit(CC1101 *cc1101, int frequency, uint8_t data) {
+
 }
 
 void get_part_num(CC1101 *cc1101, uint8_t **output) {
-    const uint8_t addr = 0x30;
-    read_reg(cc1101, addr, output, 0);
+    uint8_t addr = 0x30;
+    read_reg(cc1101, addr, output, 1, 0);
 }
